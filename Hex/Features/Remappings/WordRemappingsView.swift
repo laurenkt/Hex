@@ -67,6 +67,8 @@ struct WordRemappingsView: View {
 					removalsSection
 				case .remappings:
 					remappingsSection
+				case .refine:
+					refineSection
 				}
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
@@ -147,6 +149,54 @@ struct WordRemappingsView: View {
 					.font(.headline)
 				Text("Replace specific words in every transcript. Matches whole words, case-insensitive, in order.")
 					.settingsCaption()
+			}
+		}
+	}
+
+	private var refineSection: some View {
+		GroupBox {
+			VStack(alignment: .leading, spacing: 10) {
+				Toggle("Enable text refinement", isOn: $store.hexSettings.refineEnabled)
+					.toggleStyle(.checkbox)
+
+				if store.hexSettings.refineEnabled {
+					VStack(alignment: .leading, spacing: 4) {
+						Text("Guidance (optional)")
+							.font(.caption.weight(.semibold))
+							.foregroundStyle(.secondary)
+						TextEditor(text: $store.hexSettings.refineGuidance)
+							.font(.body)
+							.frame(minHeight: 60, maxHeight: 120)
+							.scrollContentBackground(.hidden)
+							.padding(6)
+							.background(
+								RoundedRectangle(cornerRadius: 6)
+									.fill(Color(nsColor: .controlBackgroundColor))
+							)
+							.overlay(alignment: .topLeading) {
+								if store.hexSettings.refineGuidance.isEmpty {
+									Text("e.g. I work in Kubernetes infrastructure. Use correct capitalization for technical terms.")
+										.font(.body)
+										.foregroundStyle(.quaternary)
+										.padding(.horizontal, 10)
+										.padding(.vertical, 14)
+										.allowsHitTesting(false)
+								}
+							}
+					}
+				}
+			}
+			.padding(.vertical, 4)
+		} label: {
+			HStack(spacing: 4) {
+				Image(systemName: "cloud")
+					.foregroundStyle(.secondary)
+				VStack(alignment: .leading, spacing: 4) {
+					Text("Refine")
+						.font(.headline)
+					Text("Uses Google Gemini to clean up grammar and formatting. Requires gcloud ADC credentials.")
+						.settingsCaption()
+				}
 			}
 		}
 	}
@@ -279,6 +329,7 @@ private struct RemappingRow: View {
 private enum ModificationSection: String, CaseIterable, Identifiable {
 	case removals
 	case remappings
+	case refine
 
 	var id: String { rawValue }
 
@@ -288,6 +339,8 @@ private enum ModificationSection: String, CaseIterable, Identifiable {
 			return "Word Removals"
 		case .remappings:
 			return "Word Remappings"
+		case .refine:
+			return "Refine"
 		}
 	}
 }

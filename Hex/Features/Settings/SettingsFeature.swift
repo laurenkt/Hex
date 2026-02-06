@@ -91,6 +91,7 @@ struct SettingsFeature {
     case addWordRemapping
     case removeWordRemapping(UUID)
     case setRemappingScratchpadFocused(Bool)
+
   }
 
   @Dependency(\.keyEventMonitor) var keyEventMonitor

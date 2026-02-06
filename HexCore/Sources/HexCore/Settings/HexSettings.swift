@@ -45,6 +45,9 @@ public struct HexSettings: Codable, Equatable, Sendable {
 	public var wordRemovalsEnabled: Bool
 	public var wordRemovals: [WordRemoval]
 	public var wordRemappings: [WordRemapping]
+	public var refineEnabled: Bool
+	public var refineGuidance: String
+	public var refineTimeoutSeconds: Double
 
 	public init(
 		soundEffectsEnabled: Bool = true,
@@ -68,7 +71,10 @@ public struct HexSettings: Codable, Equatable, Sendable {
 		hasCompletedStorageMigration: Bool = false,
 		wordRemovalsEnabled: Bool = false,
 		wordRemovals: [WordRemoval] = HexSettings.defaultWordRemovals,
-		wordRemappings: [WordRemapping] = []
+		wordRemappings: [WordRemapping] = [],
+		refineEnabled: Bool = false,
+		refineGuidance: String = "",
+		refineTimeoutSeconds: Double = 5.0
 	) {
 		self.soundEffectsEnabled = soundEffectsEnabled
 		self.soundEffectsVolume = soundEffectsVolume
@@ -92,6 +98,9 @@ public struct HexSettings: Codable, Equatable, Sendable {
 		self.wordRemovalsEnabled = wordRemovalsEnabled
 		self.wordRemovals = wordRemovals
 		self.wordRemappings = wordRemappings
+		self.refineEnabled = refineEnabled
+		self.refineGuidance = refineGuidance
+		self.refineTimeoutSeconds = refineTimeoutSeconds
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -136,6 +145,9 @@ private enum HexSettingKey: String, CodingKey, CaseIterable {
 	case wordRemovalsEnabled
 	case wordRemovals
 	case wordRemappings
+	case refineEnabled
+	case refineGuidance
+	case refineTimeoutSeconds
 }
 
 private struct SettingsField<Value: Codable & Sendable> {
@@ -266,6 +278,9 @@ private enum HexSettingsSchema {
 			.wordRemappings,
 			keyPath: \.wordRemappings,
 			default: defaults.wordRemappings
-		).eraseToAny()
+		).eraseToAny(),
+		SettingsField(.refineEnabled, keyPath: \.refineEnabled, default: defaults.refineEnabled).eraseToAny(),
+		SettingsField(.refineGuidance, keyPath: \.refineGuidance, default: defaults.refineGuidance).eraseToAny(),
+		SettingsField(.refineTimeoutSeconds, keyPath: \.refineTimeoutSeconds, default: defaults.refineTimeoutSeconds).eraseToAny(),
 	]
 }

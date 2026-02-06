@@ -14,7 +14,7 @@ extension Date {
 	func relativeFormatted() -> String {
 		let calendar = Calendar.current
 		let now = Date()
-		
+
 		if calendar.isDateInToday(self) {
 			return "Today"
 		} else if calendar.isDateInYesterday(self) {
@@ -205,7 +205,7 @@ struct HistoryFeature {
 						try? FileManager.default.removeItem(at: transcript.audioPath)
 					}
 				}
-				
+
 			case .navigateToSettings:
 				// This will be handled by the parent reducer
 				return .none
@@ -221,9 +221,11 @@ struct TranscriptView: View {
 	let onCopy: () -> Void
 	let onDelete: () -> Void
 
+	@State private var showingOriginal = false
+
 	var body: some View {
 		VStack(alignment: .leading, spacing: 0) {
-			Text(transcript.text)
+			Text(showingOriginal ? (transcript.rawText ?? transcript.text) : transcript.text)
 				.font(.body)
 				.lineLimit(nil)
 				.fixedSize(horizontal: false, vertical: true)
@@ -243,14 +245,14 @@ struct TranscriptView: View {
 						if let appName = transcript.sourceAppName {
 							Text(appName)
 						}
-						Text("•")
+						Text("\u{2022}")
 					}
-					
+
 					Image(systemName: "clock")
 					Text(transcript.timestamp.relativeFormatted())
-					Text("•")
+					Text("\u{2022}")
 					Text(transcript.timestamp.formatted(date: .omitted, time: .shortened))
-					Text("•")
+					Text("\u{2022}")
 					Text(String(format: "%.1fs", transcript.duration))
 				}
 				.font(.subheadline)
@@ -259,6 +261,17 @@ struct TranscriptView: View {
 				Spacer()
 
 				HStack(spacing: 10) {
+					if transcript.rawText != nil {
+						Button {
+							withAnimation { showingOriginal.toggle() }
+						} label: {
+							Image(systemName: showingOriginal ? "text.badge.checkmark" : "text.badge.minus")
+						}
+						.buttonStyle(.plain)
+						.foregroundStyle(showingOriginal ? .blue : .secondary)
+						.help(showingOriginal ? "Show refined" : "Show original")
+					}
+
 					Button {
 						onCopy()
 						showCopyAnimation()

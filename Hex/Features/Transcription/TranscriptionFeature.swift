@@ -14,6 +14,7 @@ import SwiftUI
 import WhisperKit
 
 private let transcriptionFeatureLogger = HexLog.transcription
+private let llmLogger = HexLog.llm
 
 @Reducer
 struct TranscriptionFeature {
@@ -22,6 +23,7 @@ struct TranscriptionFeature {
     var isRecording: Bool = false
     var isTranscribing: Bool = false
     var isPrewarming: Bool = false
+    var isLLMProcessing: Bool = false
     var error: String?
     var recordingStartTime: Date?
     var meter: Meter = .init(averagePower: 0, peakPower: 0)
@@ -53,6 +55,10 @@ struct TranscriptionFeature {
     case transcriptionResult(String, URL)
     case transcriptionError(Error, URL?)
 
+    // LLM post-processing
+    case llmResult(refined: String, raw: String, duration: TimeInterval, sourceAppBundleID: String?, sourceAppName: String?, audioURL: URL)
+    case llmFailed(raw: String, duration: TimeInterval, sourceAppBundleID: String?, sourceAppName: String?, audioURL: URL)
+
     // Model availability
     case modelMissing
   }
@@ -70,6 +76,7 @@ struct TranscriptionFeature {
   @Dependency(\.sleepManagement) var sleepManagement
   @Dependency(\.date.now) var now
   @Dependency(\.transcriptPersistence) var transcriptPersistence
+  @Dependency(\.llm) var llm
 
   var body: some ReducerOf<Self> {
     Reduce { state, action in
@@ -121,6 +128,46 @@ struct TranscriptionFeature {
       case let .transcriptionError(error, audioURL):
         return handleTranscriptionError(&state, error: error, audioURL: audioURL)
 
+      // MARK: - LLM Post-Processing
+
+      case let .llmResult(refined, raw, duration, sourceAppBundleID, sourceAppName, audioURL):
+        state.isLLMProcessing = false
+        let finalText = refined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? raw : refined
+        return .run { send in
+          do {
+            try await finalizeRecordingAndStoreTranscript(
+              result: finalText,
+              duration: duration,
+              sourceAppBundleID: sourceAppBundleID,
+              sourceAppName: sourceAppName,
+              audioURL: audioURL,
+              transcriptionHistory: Shared(.transcriptionHistory),
+              rawText: raw
+            )
+          } catch {
+            await send(.transcriptionError(error, audioURL))
+          }
+        }
+        .cancellable(id: CancelID.transcription)
+
+      case let .llmFailed(raw, duration, sourceAppBundleID, sourceAppName, audioURL):
+        state.isLLMProcessing = false
+        return .run { send in
+          do {
+            try await finalizeRecordingAndStoreTranscript(
+              result: raw,
+              duration: duration,
+              sourceAppBundleID: sourceAppBundleID,
+              sourceAppName: sourceAppName,
+              audioURL: audioURL,
+              transcriptionHistory: Shared(.transcriptionHistory)
+            )
+          } catch {
+            await send(.transcriptionError(error, audioURL))
+          }
+        }
+        .cancellable(id: CancelID.transcription)
+
       case .modelMissing:
         return .none
 
@@ -128,7 +175,7 @@ struct TranscriptionFeature {
 
       case .cancel:
         // Only cancel if we're in the middle of recording, transcribing, or post-processing
-        guard state.isRecording || state.isTranscribing else {
+        guard state.isRecording || state.isTranscribing || state.isLLMProcessing else {
           return .none
         }
         return handleCancel(&state)
@@ -438,6 +485,27 @@ private extension TranscriptionFeature {
 
     let sourceAppBundleID = state.sourceAppBundleID
     let sourceAppName = state.sourceAppName
+    let llmEnabled = state.hexSettings.refineEnabled
+    let llmGuidance = state.hexSettings.refineGuidance
+    let llmTimeout = state.hexSettings.refineTimeoutSeconds
+
+    // If LLM post-processing is enabled, run it before pasting
+    if llmEnabled {
+      state.isLLMProcessing = true
+      return .run { [llm] send in
+        do {
+          llmLogger.info("Starting LLM refinement for text length \(modifiedResult.count)")
+          let refined = try await llm.process(modifiedResult, llmGuidance, llmTimeout)
+          llmLogger.info("LLM refinement complete, output length \(refined.count)")
+          await send(.llmResult(refined: refined, raw: modifiedResult, duration: duration, sourceAppBundleID: sourceAppBundleID, sourceAppName: sourceAppName, audioURL: audioURL))
+        } catch {
+          llmLogger.error("LLM refinement failed, falling back to raw text: \(error.localizedDescription)")
+          await send(.llmFailed(raw: modifiedResult, duration: duration, sourceAppBundleID: sourceAppBundleID, sourceAppName: sourceAppName, audioURL: audioURL))
+        }
+      }
+      .cancellable(id: CancelID.transcription)
+    }
+
     let transcriptionHistory = state.$transcriptionHistory
 
     return .run { send in
@@ -464,6 +532,7 @@ private extension TranscriptionFeature {
   ) -> Effect<Action> {
     state.isTranscribing = false
     state.isPrewarming = false
+    state.isLLMProcessing = false
     state.error = error.localizedDescription
     
     if let audioURL {
@@ -480,7 +549,8 @@ private extension TranscriptionFeature {
     sourceAppBundleID: String?,
     sourceAppName: String?,
     audioURL: URL,
-    transcriptionHistory: Shared<TranscriptionHistory>
+    transcriptionHistory: Shared<TranscriptionHistory>,
+    rawText: String? = nil
   ) async throws {
     @Shared(.hexSettings) var hexSettings: HexSettings
 
@@ -490,7 +560,8 @@ private extension TranscriptionFeature {
         audioURL,
         duration,
         sourceAppBundleID,
-        sourceAppName
+        sourceAppName,
+        rawText
       )
 
       transcriptionHistory.withLock { history in
@@ -522,6 +593,7 @@ private extension TranscriptionFeature {
     state.isTranscribing = false
     state.isRecording = false
     state.isPrewarming = false
+    state.isLLMProcessing = false
 
     return .merge(
       .cancel(id: CancelID.transcription),
@@ -557,7 +629,9 @@ struct TranscriptionView: View {
   @ObserveInjection var inject
 
   var status: TranscriptionIndicatorView.Status {
-    if store.isTranscribing {
+    if store.isLLMProcessing {
+      return .transcribing
+    } else if store.isTranscribing {
       return .transcribing
     } else if store.isRecording {
       return .recording
